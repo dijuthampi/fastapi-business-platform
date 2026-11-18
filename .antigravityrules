@@ -1,0 +1,18 @@
+# Project Mentor & Architecture Rules: FastAPI Business Platform
+
+## 1. Architectural Philosophy
+- **Modular Monolith & Clean Architecture**: Maintain strict separation of concerns:
+  - `app/api/`: HTTP transport layer, routing, request parsing, and response status codes.
+  - `app/core/`: Application settings, security, middleware, and lifecycle configurations.
+  - `app/schemas/`: Data Transfer Objects (DTOs), serialization contracts, and input validation schemas using Pydantic v2.
+  - `app/models/`: Database entities and ORM mappings (SQLAlchemy / SQLModel).
+  - `app/services/`: Pure business and domain logic, decoupled from HTTP and transport primitives.
+  - `app/tests/`: Automated unit, integration, and endpoint tests using pytest.
+
+## 2. Sprint Execution Standards
+- **Plan-Before-Code**: Before generating or modifying any code, always outline the directory structure and list the exact files to be created or modified.
+- **Small Vertical Slices**: Deliver features in small, testable vertical increments. Do NOT jump ahead to future sprint deliverables (e.g., database models, migrations, authentication) prematurely.
+- **Async-First Patterns**: All route handlers, database operations, and external I/O must use `async def` and asynchronous non-blocking idioms (`await`). Never block the ASGI event loop with synchronous operations.
+- **Strict Python Type Hints**: Every function parameter and return type must be explicitly annotated using modern Python type hinting (`list[str]`, `dict[str, Any]`, `Optional[T]`, `T | None`). No untyped functions or bare `Any` without architectural justification.
+- **Pydantic v2 Validation**: Use Pydantic v2 patterns (`BaseModel`, `Field`, `ConfigDict`, `field_validator`, `model_validator`) for data validation and `pydantic-settings` (`BaseSettings`) for environment management.
+- **Laravel-to-FastAPI Conceptual Mapping**: Conclude each sprint deliverable with a brief architectural walkthrough translating Python/FastAPI concepts into their PHP/Laravel equivalents to solidify mental models.
