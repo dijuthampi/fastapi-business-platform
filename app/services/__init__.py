@@ -1,6 +1,5 @@
-"""Business logic and service layer package.
+"""Business logic and service layer package."""
 
-Placeholder for Sprint 4: Business Services & Domain Logic.
-"""
+from app.services import auth_service
 
-__all__: list[str] = []
+__all__ = ["auth_service"]
