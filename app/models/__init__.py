@@ -1,6 +1,7 @@
-"""Database models package (SQLAlchemy / SQLModel entities).
+"""Database models package (SQLAlchemy 2.0 ORM entities)."""
 
-Placeholder for Sprint 2: Database Models & Migrations.
-"""
+from app.core.database import Base
+from app.models.organization import Organization
+from app.models.user import User
 
-__all__: list[str] = []
+__all__ = ["Base", "Organization", "User"]

@@ -42,8 +42,10 @@ RUN groupadd --gid 10001 appgroup && \
 # Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy application source code
+# Copy application source code and database migration assets
 COPY --chown=appuser:appgroup ./app /app/app
+COPY --chown=appuser:appgroup ./alembic /app/alembic
+COPY --chown=appuser:appgroup alembic.ini /app/alembic.ini
 
 # Switch to non-root user
 USER appuser
