@@ -1,7 +1,8 @@
 """Database models package (SQLAlchemy 2.0 ORM entities)."""
 
 from app.core.database import Base
+from app.models.document import Document
 from app.models.organization import Organization
 from app.models.user import User
 
-__all__ = ["Base", "Organization", "User"]
+__all__ = ["Base", "Document", "Organization", "User"]

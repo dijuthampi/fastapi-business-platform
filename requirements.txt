@@ -24,3 +24,10 @@ pyjwt>=2.9.0
 python-multipart>=0.0.12
 
 email-validator>=2.2.0
+
+# Background Worker & Async Redis Queue
+arq>=0.26.1,<1.0.0
+
+# Document & PDF Text Extraction
+pypdf>=5.1.0,<6.0.0
+

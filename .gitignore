@@ -36,6 +36,11 @@ env/
 .env
 !.env.example
 
+# File uploads and local storage
+storage/
+/app/storage/uploads
+
+
 # Testing & Coverage
 .pytest_cache/
 .coverage

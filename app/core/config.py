@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Redis Configuration
     REDIS_URL: str = "redis://redis:6379/0"
 
+    # Storage & Upload Configuration
+    UPLOAD_DIR: str = "/app/storage/uploads"
+    MAX_UPLOAD_SIZE_MB: int = 10
+
     # CORS Configuration
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost",
