@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "/app/storage/uploads"
     MAX_UPLOAD_SIZE_MB: int = 10
 
+    # AI & Vector Embedding Configuration
+    AI_PROVIDER: str = "mock"  # "mock" | "openai" | "gemini"
+    OPENAI_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    EMBEDDING_DIMENSION: int = 1536
+    CHUNK_SIZE: int = 800
+    CHUNK_OVERLAP: int = 150
+
     # CORS Configuration
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost",

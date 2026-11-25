@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
+import pgvector.sqlalchemy
 from app.core.config import settings
-from app.models import Base
+from app.models import Base, DocumentChunk
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

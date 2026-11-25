@@ -8,6 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.document_chunk import DocumentChunk
     from app.models.organization import Organization
     from app.models.user import User
 
@@ -74,6 +75,12 @@ class Document(Base, TimestampMixin):
     uploaded_by: Mapped[Optional["User"]] = relationship(
         "User",
         lazy="joined",
+    )
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        "DocumentChunk",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
     def __repr__(self) -> str:

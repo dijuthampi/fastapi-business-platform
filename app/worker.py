@@ -6,11 +6,17 @@ from typing import Any
 from uuid import UUID
 
 import pypdf
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
+from app.services.ai_service import (
+    chunk_text,
+    extract_text_from_pdf_multimodal,
+    generate_embedding,
+)
 
 try:
     from arq.connections import ArqRedis, RedisSettings, create_pool
@@ -104,18 +110,66 @@ async def process_document_task(ctx: dict, document_id: str) -> None:
             await session.commit()
             await session.refresh(document)
 
-            # 2. Extract text from file on disk
-            extracted_text = extract_text_from_file(
-                file_path=document.file_path,
-                content_type=document.content_type,
+            # 2. Extract text from file on disk (Multimodal Gemini with automatic pypdf fallback)
+            extracted_text = ""
+            is_pdf = (
+                document.content_type == "application/pdf"
+                or document.file_path.lower().endswith(".pdf")
             )
 
-            # 3. Mark completed and store extracted content
+            if is_pdf and settings.AI_PROVIDER == "gemini" and settings.GEMINI_API_KEY:
+                try:
+                    logger.info(
+                        f"Attempting multimodal PDF extraction via Gemini for document_id={document.id}"
+                    )
+                    extracted_text = await extract_text_from_pdf_multimodal(document.file_path)
+                except Exception as exc:
+                    logger.warning(
+                        f"Multimodal PDF extraction failed for document_id={document.id}: {exc}. "
+                        "Falling back to standard pypdf extraction."
+                    )
+                    extracted_text = ""
+
+            if not extracted_text:
+                extracted_text = extract_text_from_file(
+                    file_path=document.file_path,
+                    content_type=document.content_type,
+                )
+
             document.extracted_text = extracted_text
+
+            # 3. Clear any existing chunks for idempotency on task retry
+            await session.execute(
+                delete(DocumentChunk).where(DocumentChunk.document_id == document.id)
+            )
+
+            # 4. Partition extracted text into overlapping semantic chunks
+            chunks = chunk_text(
+                text=extracted_text,
+                chunk_size=settings.CHUNK_SIZE,
+                overlap=settings.CHUNK_OVERLAP,
+            )
+
+            # 5. Generate vector embeddings and persist DocumentChunk entities
+            for chunk_idx, chunk_content in enumerate(chunks):
+                chunk_vector = await generate_embedding(chunk_content)
+                doc_chunk = DocumentChunk(
+                    organization_id=document.organization_id,
+                    document_id=document.id,
+                    chunk_index=chunk_idx,
+                    content=chunk_content,
+                    embedding=chunk_vector,
+                )
+                session.add(doc_chunk)
+
+            # 6. Mark document as completed and commit transaction atomically
             document.status = "completed"
             document.error_message = None
             await session.commit()
-            logger.info(f"Successfully processed and completed document_id={document_id}")
+            logger.info(
+                f"Successfully processed document_id={document_id}: "
+                f"extracted {len(extracted_text)} chars, created {len(chunks)} chunks"
+            )
 
         except Exception as exc:
             logger.exception(f"Error processing document {document_id}: {exc}")
