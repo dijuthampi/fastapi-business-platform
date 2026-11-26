@@ -1,12 +1,13 @@
 """Document upload and status API endpoints with strict multi-tenant isolation."""
 
 import logging
+import os
 from pathlib import Path
 from typing import List
 import uuid
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -188,3 +189,48 @@ async def get_document(
         )
 
     return document
+
+
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete document, disk storage, and cascaded vector chunks",
+    description=(
+        "Permanently deletes a document record and cascades to remove all associated "
+        "vector chunks. Also removes the physical file from disk storage. "
+        "Enforces strict multi-tenant isolation: returns 404 if the document does not "
+        "exist or belongs to another organization."
+    ),
+)
+async def delete_document(
+    document_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Delete document with strict tenant isolation, safe disk cleanup, and cascaded chunk purging."""
+    stmt = select(Document).where(
+        Document.id == document_id,
+        Document.organization_id == current_user.organization_id,
+    )
+    result = await db.execute(stmt)
+    document = result.scalar_one_or_none()
+
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    # Safely remove physical file from disk if present
+    if document.file_path and os.path.exists(document.file_path):
+        try:
+            os.remove(document.file_path)
+            logger.info(f"Deleted physical document file: {document.file_path}")
+        except OSError as exc:
+            logger.warning(f"Failed to remove file from disk {document.file_path}: {exc}")
+
+    # Delete Document entity from database (cascades to document_chunks)
+    await db.delete(document)
+    await db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

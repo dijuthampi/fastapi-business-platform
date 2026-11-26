@@ -1,11 +1,12 @@
 """Authentication API endpoints: registration, OAuth2 login, and current user profile."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.core.security import create_access_token
 from app.models.user import User
 from app.schemas.auth import RegisterRequest, TokenResponse
@@ -25,7 +26,9 @@ router = APIRouter()
         "administrator user. Returns the registered admin user profile."
     ),
 )
+@limiter.limit("10/minute")
 async def register(
+    request: Request,
     payload: RegisterRequest,
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -43,7 +46,9 @@ async def register(
         "Returns a JWT Bearer access token encoded with tenant and role claims."
     ),
 )
+@limiter.limit("10/minute")
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> TokenResponse:

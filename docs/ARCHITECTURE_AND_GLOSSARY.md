@@ -235,6 +235,7 @@ fastapi-business-platform/
 │   ├── core/                              # Core kernel & low-level platform modules
 │   │   ├── config.py                      # Pydantic BaseSettings singleton (.env parser)
 │   │   ├── database.py                    # Async engine, sessionmaker, Base, TimestampMixin, get_db
+│   │   ├── limiter.py                     # API rate limiting setup (slowapi singleton)
 │   │   └── security.py                    # Argon2 password hashing & PyJWT token handling
 │   ├── models/                            # SQLAlchemy 2.0 ORM database entities
 │   │   ├── __init__.py                    # Model registry export (Base, Org, User, Doc, Chunk)
@@ -278,9 +279,11 @@ fastapi-business-platform/
 | `app/main.py` | Presentation / Bootstrap | `create_application()`, `lifespan()` context manager, CORS middleware setup, router mounting. |
 | `app/core/config.py` | Configuration | `Settings(BaseSettings)` class reading `.env`; exports cached `settings` singleton. |
 | `app/core/database.py` | Persistence Engine | `async_engine`, `AsyncSessionLocal`, `Base(DeclarativeBase)`, `TimestampMixin`, `get_db()`. |
+| `app/core/limiter.py` | Rate Limiting | Rate limiter singleton with remote-address keying (`slowapi`). |
 | `app/core/security.py` | Security Kernel | `hash_password()`, `verify_password()`, `create_access_token()`, `decode_access_token()`. |
 | `app/api/deps.py` | Inversion of Control | `oauth2_scheme`, `get_current_user()`, `get_current_active_admin()`. |
 | `app/api/v1/router.py` | Transport Routing | Aggregates sub-routers (`health`, `auth`, `documents`, `ai`) under `/api/v1`. |
+| `app/api/v1/endpoints/documents.py` | Transport Controller | `POST /upload`, `GET /`, `GET /{document_id}`, `DELETE /{document_id}`. |
 | `app/api/v1/endpoints/ai.py` | Transport Controller | `POST /api/v1/ai/ask` RAG Q&A endpoint executing vector queries. |
 | `app/models/document_chunk.py` | ORM Entity | `DocumentChunk`: `id`, `organization_id`, `document_id`, `chunk_index`, `content`, `embedding: Vector(1536)`. |
 | `app/services/ai_service.py` | Domain Service | `chunk_text()`, `extract_text_from_pdf_multimodal()`, `generate_embedding()`, `generate_rag_answer()`, `_generate_mock_embedding()`. |
@@ -414,6 +417,18 @@ fastapi-business-platform/
 - **Why we used it:** Zero-maintenance, live API documentation accessible at `http://localhost:8000/docs` in development mode.
 - **Laravel 12 Mental Mapping:** Equivalent to packages like `dedoc/scramble` or `l5-swagger` (Swagger-PHP annotations).
 
+#### 15. API Rate Limiting (`slowapi`) & Anti-Abuse Protection
+- **What it is:** A rate-limiting framework for FastAPI based on `limits` and `slowapi`. It throttles excessive requests per IP address or user identity to protect against brute-force attacks and denial-of-service spikes.
+- **Why we used it:** Without rate limiting, authentication endpoints (`POST /auth/login`, `POST /auth/register`) can be brute-forced, and expensive LLM endpoints (`POST /ai/ask`) can quickly exhaust cloud API quotas or spike infrastructure costs. We enforce `10/minute` on auth and `20/minute` on RAG queries, returning standard HTTP `429 Too Many Requests`.
+- **How it works in our code:** [app/core/limiter.py](file:///c:/laragon/www/fastapi-business-platform/app/core/limiter.py) initializes `Limiter(key_func=get_remote_address)`. In [app/main.py](file:///c:/laragon/www/fastapi-business-platform/app/main.py), it is attached to `app.state.limiter` with `_rate_limit_exceeded_handler`. Individual endpoints use `@limiter.limit(...)`. In [app/tests/conftest.py](file:///c:/laragon/www/fastapi-business-platform/app/tests/conftest.py), `limiter.enabled = False` disables rate limits during test execution.
+- **Laravel 12 Mental Mapping:** Maps directly to **Laravel Route Rate Limiting** (`RateLimiter::for('api', ...)` and `throttle:10,1` middleware).
+
+#### 16. Multi-Tenant Document Deletion & Cascaded Purging
+- **What it is:** The complete and secure destruction of an uploaded document, including its metadata, physical file on disk, and all associated vector embeddings.
+- **Why we used it:** Tenants need full data lifecycle governance (e.g. GDPR compliance / Right to be Forgotten). Deletion must be atomic and strictly isolated so Tenant A can never delete or infer the existence of Tenant B's files.
+- **How it works in our code:** In [app/api/v1/endpoints/documents.py](file:///c:/laragon/www/fastapi-business-platform/app/api/v1/endpoints/documents.py), `DELETE /documents/{document_id}` filters strictly by `Document.organization_id == current_user.organization_id`. If found, it removes the physical disk file (`os.remove`) and executes `await db.delete(document)`, which triggers database-level `CASCADE` on `document_chunks` table, purging all 1536-dim vector rows in the same transaction before returning HTTP `204 No Content`.
+- **Laravel 12 Mental Mapping:** Matches an Eloquent controller method: `$doc = Document::where('org_id', $orgId)->findOrFail($id); Storage::delete($doc->path); $doc->delete(); return response()->noContent();`.
+
 ---
 
 ## 4. Master Cheat Sheet: Laravel 12 ↔ FastAPI Architecture Matrix
@@ -439,6 +454,8 @@ fastapi-business-platform/
 | **Vector Similarity Search** | Scout with pgvector driver or raw Eloquent scope | `DocumentChunk.embedding.cosine_distance(v).asc()` |
 | **Automated Testing** | `php artisan test` (Pest / PHPUnit) | **Pytest** with `fastapi.testclient.TestClient` (`pytest -v`) |
 | **Interactive API Documentation** | Scramble / L5-Swagger | Automatic OpenAPI / Swagger UI at `/docs` |
+| **API Rate Limiting** | `throttle:10,1` / `RateLimiter::for(...)` | `slowapi` (`@limiter.limit("10/minute")`) |
+| **Model Cascading Deletes** | Eloquent `$model->delete()` with DB cascades | SQLAlchemy `await db.delete(doc)` with `cascade="all, delete-orphan"` |
 
 ---
 

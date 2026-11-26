@@ -429,3 +429,121 @@ async def test_process_document_task_handles_missing_file_failure() -> None:
     assert mock_doc.status == "failed"
     assert "File not found" in str(mock_doc.error_message)
     assert mock_session.rollback.awaited
+
+
+# ---------------------------------------------------------------------------
+# Integration Tests: Document Deletion (DELETE /api/v1/documents/{document_id})
+# ---------------------------------------------------------------------------
+
+def test_delete_document_success(mock_current_user: User, tmp_path: Path) -> None:
+    """Test successful document deletion: removes disk file, deletes DB record, returns 204."""
+    test_file = tmp_path / "delete_me.pdf"
+    test_file.write_bytes(b"%PDF-1.4 sample content")
+    assert test_file.exists()
+
+    doc_id = uuid.uuid4()
+    mock_document = Document(
+        id=doc_id,
+        organization_id=mock_current_user.organization_id,
+        uploaded_by_id=mock_current_user.id,
+        filename="delete_me.pdf",
+        file_path=str(test_file),
+        content_type="application/pdf",
+        file_size=1024,
+        status="completed",
+    )
+
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_document
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.delete = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    app.dependency_overrides[get_current_user] = lambda: mock_current_user
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    try:
+        response = client.delete(f"/api/v1/documents/{doc_id}")
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert response.content == b""
+
+        # Verify disk cleanup
+        assert not test_file.exists()
+
+        # Verify database record deletion
+        mock_db.delete.assert_awaited_once_with(mock_document)
+        mock_db.commit.assert_awaited_once()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_document_cross_tenant_isolation(
+    mock_current_user: User,
+    tmp_path: Path,
+) -> None:
+    """Test cross-tenant isolation: deleting another tenant's document returns 404 without leaking."""
+    test_file = tmp_path / "other_tenant.pdf"
+    test_file.write_bytes(b"%PDF-1.4 other tenant content")
+    assert test_file.exists()
+
+    other_doc_id = uuid.uuid4()
+
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    # Query with Document.organization_id == current_user.organization_id returns None
+    mock_result.scalar_one_or_none.return_value = None
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.delete = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    app.dependency_overrides[get_current_user] = lambda: mock_current_user
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    try:
+        response = client.delete(f"/api/v1/documents/{other_doc_id}")
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.json()["detail"] == "Document not found"
+
+        # Verify file on disk is untouched
+        assert test_file.exists()
+
+        # Verify no database deletion occurred
+        mock_db.delete.assert_not_called()
+        mock_db.commit.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_document_missing_disk_file_succeeds(mock_current_user: User) -> None:
+    """Test that deleting a document whose physical file was already missing still cleans up DB."""
+    doc_id = uuid.uuid4()
+    mock_document = Document(
+        id=doc_id,
+        organization_id=mock_current_user.organization_id,
+        uploaded_by_id=mock_current_user.id,
+        filename="already_missing.pdf",
+        file_path="/tmp/non_existent_path_404.pdf",
+        content_type="application/pdf",
+        file_size=1024,
+        status="completed",
+    )
+
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = mock_document
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.delete = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    app.dependency_overrides[get_current_user] = lambda: mock_current_user
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    try:
+        response = client.delete(f"/api/v1/documents/{doc_id}")
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        mock_db.delete.assert_awaited_once_with(mock_document)
+        mock_db.commit.assert_awaited_once()
+    finally:
+        app.dependency_overrides.clear()
+
